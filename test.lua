@@ -1,3 +1,5 @@
+local pl = require 'pl.import_into' ()
+
 local expr = {
 	sym = {};
 	Scode = {};
@@ -365,8 +367,8 @@ local function satisfy(body)
 	return res
 end
 
-if false then
-	local res = satisfy(function(var, ensure)
+if true then
+	local d = satisfy(function(var, ensure)
 		local function parallel(...)
 			local parts_c, parts_x, parts_y = {}, {}, {}
 			local n = select('#', ...)
@@ -410,6 +412,24 @@ if false then
 								break
 							end
 						end
+
+						if type(prop) == 'function' then
+							local res = prop(v)
+							repeat
+								if res == nil then
+									break
+								end
+								if type(res) == 'table' then
+									if res[expr.sym] then
+										ensure(res)
+										break
+									end
+								end
+								error(('todo: res = %s'):format(res))
+							until true
+							break
+						end
+
 						error(('todo: %s (%s) = %s'):format(k, prop, v))
 					until true
 				end
@@ -471,6 +491,16 @@ if false then
 			end
 			return line
 		end
+		local x_axis = shape.line 'x axis' {
+			x_coef = 0;
+			y_coef = 1;
+			const = 0;
+		}
+		local y_axis = shape.line 'y axis' {
+			x_coef = 1;
+			y_coef = 0;
+			const = 0;
+		}
 		function shape.line_segment(name, opts)
 			local segment = {
 				[shape.sym] = true;
@@ -525,6 +555,12 @@ if false then
 				rect.bottom[shape.Scontains](x, y),
 				rect.left[shape.Scontains](x, y)
 			) end
+			function rect.aligned()
+				return expr.and_(
+					parallel(rect.top.line, x_axis),
+					expr.strictly_decreasing(rect.top.p1.y, rect.bottom.p1.y)
+				)
+			end
 			setmetatable(rect, shape.mt)
 			shape.all[rect] = true
 			if opts then
@@ -533,15 +569,18 @@ if false then
 			return rect
 		end
 
-		local ground = shape.line 'ground' {
-			x_coef = 0;
-			y_coef = 1;
-			const = 0;
+		local d = {}
+		d.house = shape.rect 'house' {
+			aligned = true;
+			top = {
+				p1 = { x = 0; };
+				len = 30 * 12;
+			};
+			left = { len = 20 * 12; };
 		}
-
-		local r = shape.rect 'r'
-		ensure(parallel(ground, r.top.line))
+		return d
 	end)
+	print(pl.pretty.write(d))
 end
 
 local function write_dxf(write, dxf)
@@ -824,9 +863,12 @@ local function write_dxf(write, dxf)
 		end
 	end
 end
-local h = io.open('test.dxf', 'w')
-write_dxf(function(s)
-	h:write(s)
-end, {
-	layers = {};
-})
+if false then
+	local h = io.open('test.dxf', 'w')
+	write_dxf(function(s)
+		h:write(s)
+	end, {
+		layers = {};
+	})
+	h:close()
+end
