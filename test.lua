@@ -284,20 +284,20 @@ function expr.not_(e_)
 	setmetatable(e, expr.mt)
 	return e
 end
-local function satisfy(body)
-	local h = io.open('test.smt2', 'w')
-	h:write '(set-logic QF_NRA)\n'
-	local vars = {}
-	local function var(label)
+function expr.env()
+	local env = {
+		vars = {};
+		ensures = {n = 0;};
+	}
+	function env.var(label)
 		local name = label:gsub('[ _%(%)]', function(c)
 			return '_' .. tostring(c:byte()) .. '_'
 		end)
 		local i = nil
-		while vars[name .. (i and tostring(i) or '')] do
+		while env.vars[name .. (i and tostring(i) or '')] do
 			i = (i or 0) + 1
 		end
 		name = name .. (i and tostring(i) or '')
-		h:write(('(declare-fun %s () Real)\n'):format(name))
 		local var; var = {
 			[expr.sym] = true;
 			[expr.Scode] = name;
@@ -305,371 +305,382 @@ local function satisfy(body)
 			label = label;
 			name = name;
 		}
-		vars[name] = var
+		env.vars[name] = var
 		setmetatable(var, expr.mt)
 		return var
 	end
-	local function ensure(...)
+	function env.ensure(...)
 		for i = 1, select('#', ...) do
-			h:write(('(assert %s)\n'):format(expr.coerce(select(i, ...))[expr.Scode]))
+			env.ensures.n = env.ensures.n + 1
+			env.ensures[env.ensures.n] = expr.coerce(select(i, ...))
 		end
 	end
-	local res = body(var, ensure)
-	h:write '(check-sat)\n'
-	for name, var in pairs(vars) do
-		h:write(('(get-value (%s))\n'):format(name))
-	end
-	h:close()
-
-	h = io.popen('z3 test.smt2', 'r')
-	while true do
-		local line = h:read '*l'
-		if not line then
-			break
+	function env.satisfy()
+		local filename = os.tmpname()
+		local h = io.open(filename, 'w')
+		h:write '(set-logic QF_NRA)\n'
+		for _, var in pairs(env.vars) do
+			h:write(('(declare-fun %s () Real)\n'):format(var.name))
 		end
-		repeat
-			if line == 'sat' then
+		for i = 1, env.ensures.n do
+			local e = env.ensures[i]
+			h:write(('(assert %s)\n'):format(e[expr.Scode]))
+		end
+		h:write '(check-sat)\n'
+		for name, var in pairs(env.vars) do
+			h:write(('(get-value (%s))\n'):format(name))
+		end
+		h:close()
+
+		h = io.popen('z3 ' .. filename, 'r')
+		local function got_var_val(name, val)
+			print(name, val)
+			env.vars[name].val = val
+		end
+		while true do
+			local line = h:read '*l'
+			if not line then
 				break
 			end
+			repeat
+				if line == 'sat' then
+					break
+				end
 
-			local name, val = line:match '^%(%(([^ %(%)]+) (%d+%.?%d*)%)%)$'
-			if name then
-				print(name, tonumber(val))
-				vars[name].val = tonumber(val)
-				break
-			end
+				local name, val = line:match '^%(%(([^ %(%)]+) (%d+%.?%d*)%)%)$'
+				if name then
+					got_var_val(name, tonumber(val))
+					break
+				end
 
-			local name, val = line:match '^%(%(([^ %(%)]+) %(%- (%d+%.?%d*)%)%)%)$'
-			if name then
-				print(name, -tonumber(val))
-				vars[name].val = -tonumber(val)
-				break
-			end
+				local name, val = line:match '^%(%(([^ %(%)]+) %(%- (%d+%.?%d*)%)%)%)$'
+				if name then
+					got_var_val(name, -tonumber(val))
+					break
+				end
 
-			local name, num, den = line:match '^%(%(([^ %(%)]+) %(/ (%d+%.?%d*) (%d+%.?%d*)%)%)%)$'
-			if name then
-				print(name, tonumber(num)/tonumber(den))
-				vars[name].val = tonumber(num)/tonumber(den)
-				break
-			end
+				local name, num, den = line:match '^%(%(([^ %(%)]+) %(/ (%d+%.?%d*) (%d+%.?%d*)%)%)%)$'
+				if name then
+					got_var_val(name, tonumber(num)/tonumber(den))
+					break
+				end
 
-			local name, num, den = line:match '^%(%(([^ %(%)]+) %(%- %(/ (%d+%.?%d*) (%d+%.?%d*)%)%)%)%)$'
-			if name then
-				print(name, -tonumber(num)/tonumber(den))
-				vars[name].val = -tonumber(num)/tonumber(den)
-				break
-			end
+				local name, num, den = line:match '^%(%(([^ %(%)]+) %(%- %(/ (%d+%.?%d*) (%d+%.?%d*)%)%)%)%)$'
+				if name then
+					got_var_val(name, -tonumber(num)/tonumber(den))
+					break
+				end
 
-			error(('todo: %q'):format(line))
-		until true
+				error(('todo: %q'):format(line))
+			until true
+		end
+		h:close()
 	end
-	h:close()
-	return res
+	return env
 end
 
 if true then
-	local d = satisfy(function(var, ensure)
-		local function parallel(...)
-			local parts_c, parts_x, parts_y = {}, {}, {}
-			local n = select('#', ...)
-			for i = 1, n do
-				local l = select(i, ...)
-				local c = var('parallel ' .. l.name)
-				parts_c[i] = expr.not_(expr.equal(c, 0))
-				parts_x[i] = c * l.x_coef
-				parts_y[i] = c * l.y_coef
-			end
-			return expr.and_(
-				expr.and_(table.unpack(parts_c, 1, n)),
-				expr.equal(table.unpack(parts_x, 1, n)),
-				expr.equal(table.unpack(parts_y, 1, n))
-			)
+	local env = expr.env()
+	local function parallel(...)
+		local parts_c, parts_x, parts_y = {}, {}, {}
+		local n = select('#', ...)
+		for i = 1, n do
+			local l = select(i, ...)
+			local c = env.var('parallel ' .. l.name)
+			parts_c[i] = expr.not_(expr.equal(c, 0))
+			parts_x[i] = c * l.x_coef
+			parts_y[i] = c * l.y_coef
 		end
-		local function perpendicular(a, b)
-			local c = var('perpendicular')
-			return expr.and_(
-				expr.not_(expr.equal(c, 0)),
-				expr.equal(a.x_coef, -c * b.y_coef),
-				expr.equal(a.y_coef,  c * b.x_coef)
-			)
-		end
-		local shape = {
-			sym = {};
-			Stype = {};
-			Scontains = {};
-			Sequal = {};
-			all = {};
-		}
-		local function apply_opts(self, opts)
-			if opts[shape.sym] then
-				assert(self[shape.Stype] == opts[shape.Stype])
-				ensure(self[shape.Sequal](opts))
-				return self
-			end
-			for k, v in pairs(opts) do
-				local prop = self[k]
-				repeat
-					if type(prop) == 'table' then
-						if prop[shape.sym] then
-							prop(v)
-							break
-						end
-
-						if prop[expr.sym] then
-							ensure(expr.equal(prop, v))
-							break
-						end
-
-						apply_opts(prop, v)
-						break
-					end
-
-					if type(prop) == 'function' then
-						local res = prop(v)
-						repeat
-							if res == nil then
-								break
-							end
-							if type(res) == 'table' then
-								if res[expr.sym] then
-									ensure(res)
-									break
-								end
-							end
-							error(('todo: res = %s'):format(res))
-						until true
-						break
-					end
-
-					error(('todo: %s (%s) = %s'):format(k, prop, v))
-				until true
-			end
+		return expr.and_(
+			expr.and_(table.unpack(parts_c, 1, n)),
+			expr.equal(table.unpack(parts_x, 1, n)),
+			expr.equal(table.unpack(parts_y, 1, n))
+		)
+	end
+	local function perpendicular(a, b)
+		local c = env.var('perpendicular')
+		return expr.and_(
+			expr.not_(expr.equal(c, 0)),
+			expr.equal(a.x_coef, -c * b.y_coef),
+			expr.equal(a.y_coef,  c * b.x_coef)
+		)
+	end
+	local shape = {
+		sym = {};
+		Stype = {};
+		Scontains = {};
+		Sequal = {};
+		all = {};
+	}
+	local function apply_opts(self, opts)
+		if opts[shape.sym] then
+			assert(self[shape.Stype] == opts[shape.Stype])
+			env.ensure(self[shape.Sequal](opts))
 			return self
 		end
-		shape.mt = {
-			__call = apply_opts;
-		}
-		function shape.make(s, opts)
-			assert(s[shape.sym])
-			assert(s[shape.Stype])
-			assert(s[shape.Scontains])
-			assert(s[shape.Sequal])
-			setmetatable(s, shape.mt)
-			shape.all[s] = true
-			if opts then
-				s(opts)
-			end
-			return s
-		end
-		function shape.point(name, opts)
-			local point = {
-				[shape.sym] = true;
-				[shape.Stype] = 'point';
-				name = name;
-				x = var(name .. ' x');
-				y = var(name .. ' y');
-			}
-			point[shape.Scontains] = function(x, y)
-				return expr.equal(x, point.x) and expr.equal(y, point.y)
-			end
-			point[shape.Sequal] = function(other)
-				return expr.and_(expr.equal(point.x, other.x), expr.equal(point.y, other.y))
-			end
-			function point.on(s)
-				return s[shape.Scontains](point.x, point.y)
-			end
-			shape.make(point, opts)
-			return point
-		end
-		function shape.intersect(name, ...)
-			local p = shape.point(name)
-			for i = 1, select('#', ...) do
-				local arg = select(i, ...)
-				if type(arg) == 'table' and arg[shape.sym] then
-					p.on(arg)
-				else
-					assert(i == select('#', ...))
-					p(arg)
-				end
-			end
-			return p
-		end
-		function shape.line(name, opts)
-			local line = {
-				[shape.sym] = true;
-				[shape.Stype] = 'line';
-				name = name;
-				x_coef = var(name .. ' x coef');
-				y_coef = var(name .. ' y coef');
-				const = var(name .. ' const');
-			}
-			ensure(expr.not_(expr.and_(expr.equal(line.x_coef, 0), expr.equal(line.y_coef, 0))))
-			line[shape.Scontains] = function(x, y)
-				return expr.equal(line.x_coef * x + line.y_coef * y, line.const)
-			end
-			line[shape.Sequal] = function(other)
-				local c = var 'line equal'
-				return expr.and_(
-					expr.not_(expr.equal(c, 0)),
-					expr.equal(line.x_coef, c * other.x_coef),
-					expr.equal(line.y_coef, c * other.y_coef),
-					expr.equal(line.const, c * other.const)
-				)
-			end
-			function line.pos(x, y)
-				return -line.y_coef * x + line.x_coef * y
-			end
-			shape.make(line, opts)
-			return line
-		end
-		local x_axis = shape.line 'x axis' {
-			x_coef = 0;
-			y_coef = 1;
-			const = 0;
-		}
-		local y_axis = shape.line 'y axis' {
-			x_coef = 1;
-			y_coef = 0;
-			const = 0;
-		}
-		function shape.line_segment(name, opts)
-			local segment = {
-				[shape.sym] = true;
-				[shape.Stype] = 'line_segment';
-				name = name;
-				line = shape.line(name .. ' line');
-			}
-			segment.points = {
-				n = 2;
-				shape.intersect(name .. ' p1', segment.line);
-				shape.intersect(name .. ' p2', segment.line);
-			}
-			segment.segments = { n = 1; segment; }
-			ensure(expr.increasing(
-				segment.line.pos(segment.points[1].x, segment.points[1].y),
-				segment.line.pos(segment.points[2].x, segment.points[2].y)
-			))
-			segment.len = (
-				(segment.points[1].x - segment.points[2].x)^2 +
-				(segment.points[1].y - segment.points[2].y)^2
-			)^0.5
-			segment[shape.Scontains] = function(x, y) return expr.and_(
-				segment.line[shape.Scontains](x, y),
-				expr.increasing(
-					segment.line.pos(segment.points[1].x, segment.points[1].y),
-					segment.line.pos(x, y),
-					segment.line.pos(segment.points[2].x, segment.points[2].y)
-				)
-			) end
-			segment[shape.Sequal] = function(other) return expr.and_(
-				segment.points[1][shape.Sequal](other.points[1]),
-				segment.points[2][shape.Sequal](other.points[2])
-			) end
-			shape.make(segment, opts)
-			return segment
-		end
-		function shape.poly(name, n, close, opts)
-			local poly = {
-				[shape.sym] = true;
-				[shape.Stype] = 'poly';
-				closed = close;
-				segments = { n = n - (close and 0 or 1); };
-				points = { n = n; };
-			}
-			for i = 1, n do
-				poly.points[i] = shape.point(name .. ' p' .. tostring(i))
-			end
-			for i = 1, n - 1 do
-				poly.segments[i] = shape.line_segment(name .. ' s' .. tostring(i), {
-					points = {
-						poly.points[i];
-						poly.points[i + 1];
-					};
-				})
-			end
-			if close then
-				poly.segments[n] = shape.line_segment(name .. ' s' .. tostring(n), {
-					points = {
-						poly.points[n - 1];
-						poly.points[n];
-					};
-				})
-			end
-			poly[shape.Scontains] = function(x, y)
-				local props = {}
-				for i = 1, poly.segments.n do
-					props[i] = poly.segments[i][shape.Scontains](x, y)
-				end
-				return expr.or_(table.unpack(props, 1, poly.segments.n))
-			end
-			poly[shape.Sequal] = function(other)
-				local props = {
-					n = poly.points.n + 2;
-					expr.equal(poly.closed, other.closed);
-					expr.equal(poly.points.n, other.points.n);
-				}
-				for i = 1, poly.points.n do
-					props[i + 2] = poly.points[i][shape.Sequal](other.points[i])
-				end
-				return expr.and_(table.unpack(props, 1, props.n))
-			end
-			shape.make(poly, opts)
-			return poly
-		end
-		function shape.rect(name, opts)
-			local rect = {
-				[shape.sym] = true;
-				[shape.Stype] = 'rect';
-				name = name;
-				poly = shape.poly(name .. ' poly', 4, true);
-			}
-			rect.top = rect.poly.segments[1]
-			rect.right = rect.poly.segments[2]
-			rect.bottom = rect.poly.segments[3]
-			rect.left = rect.poly.segments[4]
-			ensure(parallel(rect.top.line, rect.bottom.line))
-			ensure(parallel(rect.left.line, rect.right.line))
-			ensure(perpendicular(rect.top.line, rect.left.line))
-			rect.top_left = rect.poly.points[1]
-			rect.top_right = rect.poly.points[2]
-			rect.bottom_right = rect.poly.points[3]
-			rect.bottom_left = rect.poly.points[4]
-			rect[shape.Scontains] = rect.poly[shape.Scontains]
-			rect[shape.Sequal] = function(other) return rect.poly[shape.Sequal](other.poly) end
-			shape.make(rect, opts)
-			return rect
-		end
-		function shape.arect(name, opts)
-			local rect = shape.rect(name)
-			ensure(expr.equal(rect.top_left.y, rect.top_right.y))
-			ensure(expr.equal(rect.bottom_left.y, rect.bottom_right.y))
-			ensure(expr.equal(rect.top_left.x, rect.bottom_left.x))
-			ensure(expr.equal(rect.top_right.x, rect.bottom_right.x))
-			rect.width = rect.top_right.x - rect.top_left.x
-			rect.height = rect.top_left.y - rect.bottom_left.y
-			ensure(expr.strictly_decreasing(rect.width, 0))
-			ensure(expr.strictly_decreasing(rect.height, 0))
-			rect.top.y = rect.top_left.y
-			rect.bottom.y = rect.bottom_left.y
-			rect.left.x = rect.top_left.x
-			rect.right.x = rect.top_right.x
-			if opts then
-				rect(opts)
-			end
-			return rect
-		end
+		for k, v in pairs(opts) do
+			local prop = self[k]
+			repeat
+				if type(prop) == 'table' then
+					if prop[shape.sym] then
+						prop(v)
+						break
+					end
 
-		local d = {}
-		d.house = shape.arect 'house' {
-			top_left = { x = 0; y = 0; };
-			width = 30 * 12;
-			height = 30 * 12;
+					if prop[expr.sym] then
+						env.ensure(expr.equal(prop, v))
+						break
+					end
+
+					apply_opts(prop, v)
+					break
+				end
+
+				if type(prop) == 'function' then
+					local res = prop(v)
+					repeat
+						if res == nil then
+							break
+						end
+						if type(res) == 'table' then
+							if res[expr.sym] then
+								env.ensure(res)
+								break
+							end
+						end
+						error(('todo: res = %s'):format(res))
+					until true
+					break
+				end
+
+				error(('todo: %s (%s) = %s'):format(k, prop, v))
+			until true
+		end
+		return self
+	end
+	shape.mt = {
+		__call = apply_opts;
+	}
+	function shape.make(s, opts)
+		assert(s[shape.sym])
+		assert(s[shape.Stype])
+		assert(s[shape.Scontains])
+		assert(s[shape.Sequal])
+		setmetatable(s, shape.mt)
+		shape.all[s] = true
+		if opts then
+			s(opts)
+		end
+		return s
+	end
+	function shape.point(name, opts)
+		local point = {
+			[shape.sym] = true;
+			[shape.Stype] = 'point';
+			name = name;
+			x = env.var(name .. ' x');
+			y = env.var(name .. ' y');
 		}
-		d.ledger = shape.arect 'ledger' {
-			bottom = { y = 0; };
+		point[shape.Scontains] = function(x, y)
+			return expr.equal(x, point.x) and expr.equal(y, point.y)
+		end
+		point[shape.Sequal] = function(other)
+			return expr.and_(expr.equal(point.x, other.x), expr.equal(point.y, other.y))
+		end
+		function point.on(s)
+			return s[shape.Scontains](point.x, point.y)
+		end
+		shape.make(point, opts)
+		return point
+	end
+	function shape.intersect(name, ...)
+		local p = shape.point(name)
+		for i = 1, select('#', ...) do
+			local arg = select(i, ...)
+			if type(arg) == 'table' and arg[shape.sym] then
+				p.on(arg)
+			else
+				assert(i == select('#', ...))
+				p(arg)
+			end
+		end
+		return p
+	end
+	function shape.line(name, opts)
+		local line = {
+			[shape.sym] = true;
+			[shape.Stype] = 'line';
+			name = name;
+			x_coef = env.var(name .. ' x coef');
+			y_coef = env.var(name .. ' y coef');
+			const = env.var(name .. ' const');
 		}
-		return d
-	end)
+		env.ensure(expr.not_(expr.and_(expr.equal(line.x_coef, 0), expr.equal(line.y_coef, 0))))
+		line[shape.Scontains] = function(x, y)
+			return expr.equal(line.x_coef * x + line.y_coef * y, line.const)
+		end
+		line[shape.Sequal] = function(other)
+			local c = env.var('line equal: ' .. line.name .. ' =? ' .. other.name)
+			return expr.and_(
+				expr.not_(expr.equal(c, 0)),
+				expr.equal(line.x_coef, c * other.x_coef),
+				expr.equal(line.y_coef, c * other.y_coef),
+				expr.equal(line.const, c * other.const)
+			)
+		end
+		function line.pos(x, y)
+			return -line.y_coef * x + line.x_coef * y
+		end
+		shape.make(line, opts)
+		return line
+	end
+	local x_axis = shape.line 'x axis' {
+		x_coef = 0;
+		y_coef = 1;
+		const = 0;
+	}
+	local y_axis = shape.line 'y axis' {
+		x_coef = 1;
+		y_coef = 0;
+		const = 0;
+	}
+	function shape.line_segment(name, opts)
+		local segment = {
+			[shape.sym] = true;
+			[shape.Stype] = 'line_segment';
+			name = name;
+			line = shape.line(name .. ' line');
+		}
+		segment.points = {
+			n = 2;
+			shape.intersect(name .. ' p1', segment.line);
+			shape.intersect(name .. ' p2', segment.line);
+		}
+		segment.segments = { n = 1; segment; }
+		env.ensure(expr.increasing(
+			segment.line.pos(segment.points[1].x, segment.points[1].y),
+			segment.line.pos(segment.points[2].x, segment.points[2].y)
+		))
+		segment.len = (
+			(segment.points[1].x - segment.points[2].x)^2 +
+			(segment.points[1].y - segment.points[2].y)^2
+		)^0.5
+		segment[shape.Scontains] = function(x, y) return expr.and_(
+			segment.line[shape.Scontains](x, y),
+			expr.increasing(
+				segment.line.pos(segment.points[1].x, segment.points[1].y),
+				segment.line.pos(x, y),
+				segment.line.pos(segment.points[2].x, segment.points[2].y)
+			)
+		) end
+		segment[shape.Sequal] = function(other) return expr.and_(
+			segment.points[1][shape.Sequal](other.points[1]),
+			segment.points[2][shape.Sequal](other.points[2])
+		) end
+		shape.make(segment, opts)
+		return segment
+	end
+	function shape.poly(name, n, close, opts)
+		local poly = {
+			[shape.sym] = true;
+			[shape.Stype] = 'poly';
+			closed = close;
+			segments = { n = n - (close and 0 or 1); };
+			points = { n = n; };
+		}
+		for i = 1, n do
+			poly.points[i] = shape.point(name .. ' p' .. tostring(i))
+		end
+		for i = 1, n - 1 do
+			poly.segments[i] = shape.line_segment(name .. ' s' .. tostring(i), {
+				points = {
+					poly.points[i];
+					poly.points[i + 1];
+				};
+			})
+		end
+		if close then
+			poly.segments[n] = shape.line_segment(name .. ' s' .. tostring(n), {
+				points = {
+					poly.points[n - 1];
+					poly.points[n];
+				};
+			})
+		end
+		poly[shape.Scontains] = function(x, y)
+			local props = {}
+			for i = 1, poly.segments.n do
+				props[i] = poly.segments[i][shape.Scontains](x, y)
+			end
+			return expr.or_(table.unpack(props, 1, poly.segments.n))
+		end
+		poly[shape.Sequal] = function(other)
+			local props = {
+				n = poly.points.n + 2;
+				expr.equal(poly.closed, other.closed);
+				expr.equal(poly.points.n, other.points.n);
+			}
+			for i = 1, poly.points.n do
+				props[i + 2] = poly.points[i][shape.Sequal](other.points[i])
+			end
+			return expr.and_(table.unpack(props, 1, props.n))
+		end
+		shape.make(poly, opts)
+		return poly
+	end
+	function shape.rect(name, opts)
+		local rect = {
+			[shape.sym] = true;
+			[shape.Stype] = 'rect';
+			name = name;
+			poly = shape.poly(name .. ' poly', 4, true);
+		}
+		rect.top = rect.poly.segments[1]
+		rect.right = rect.poly.segments[2]
+		rect.bottom = rect.poly.segments[3]
+		rect.left = rect.poly.segments[4]
+		env.ensure(parallel(rect.top.line, rect.bottom.line))
+		env.ensure(parallel(rect.left.line, rect.right.line))
+		env.ensure(perpendicular(rect.top.line, rect.left.line))
+		rect.top_left = rect.poly.points[1]
+		rect.top_right = rect.poly.points[2]
+		rect.bottom_right = rect.poly.points[3]
+		rect.bottom_left = rect.poly.points[4]
+		rect[shape.Scontains] = rect.poly[shape.Scontains]
+		rect[shape.Sequal] = function(other) return rect.poly[shape.Sequal](other.poly) end
+		shape.make(rect, opts)
+		return rect
+	end
+	function shape.arect(name, opts)
+		local rect = shape.rect(name)
+		env.ensure(expr.equal(rect.top_left.y, rect.top_right.y))
+		env.ensure(expr.equal(rect.bottom_left.y, rect.bottom_right.y))
+		env.ensure(expr.equal(rect.top_left.x, rect.bottom_left.x))
+		env.ensure(expr.equal(rect.top_right.x, rect.bottom_right.x))
+		rect.width = rect.top_right.x - rect.top_left.x
+		rect.height = rect.top_left.y - rect.bottom_left.y
+		env.ensure(expr.strictly_decreasing(rect.width, 0))
+		env.ensure(expr.strictly_decreasing(rect.height, 0))
+		rect.top.y = rect.top_left.y
+		rect.bottom.y = rect.bottom_left.y
+		rect.left.x = rect.top_left.x
+		rect.right.x = rect.top_right.x
+		if opts then
+			rect(opts)
+		end
+		return rect
+	end
+
+	local d = {}
+	d.house = shape.arect 'house' {
+		top_left = { x = 0; y = 0; };
+		width = 30 * 12;
+		height = 30 * 12;
+	}
+	d.ledger = shape.arect 'ledger' {
+		bottom = { y = 0; };
+	}
+	env.satisfy()
 	print(pl.pretty.write(d))
 end
 
