@@ -367,7 +367,7 @@ local function satisfy(body)
 	return res
 end
 
-if true then
+if false then
 	local d = satisfy(function(var, ensure)
 		local function parallel(...)
 			local parts_c, parts_x, parts_y = {}, {}, {}
@@ -764,7 +764,7 @@ local function write_dxf(write, dxf)
 			write('5\n3\n') -- handle TODO
 			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
 			write('100\nAcDbSymbolTable\n')
-			write('70\n1\n') -- number of layers
+			write('70\n1\n') -- number of styles
 			do
 				write('0\nSTYLE\n')
 				write('5\n58\n') -- handle TODO
@@ -790,7 +790,7 @@ local function write_dxf(write, dxf)
 			write('5\n6\n') -- handle TODO
 			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
 			write('100\nAcDbSymbolTable\n')
-			write('70\n0\n') -- number of layers
+			write('70\n0\n') -- number of views
 			write('0\nENDTAB\n')
 		end
 		do -- UCS
@@ -799,7 +799,7 @@ local function write_dxf(write, dxf)
 			write('5\n7\n') -- handle TODO
 			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
 			write('100\nAcDbSymbolTable\n')
-			write('70\n0\n') -- number of layers
+			write('70\n0\n') -- number of UCSs
 			write('0\nENDTAB\n')
 		end
 		do -- APPID
@@ -808,7 +808,7 @@ local function write_dxf(write, dxf)
 			write('5\n9\n') -- handle TODO
 			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
 			write('100\nAcDbSymbolTable\n')
-			write('70\n1\n') -- number of layers
+			write('70\n1\n') -- number of appids
 			do
 				write('0\nAPPID\n')
 				write('5\n12\n') -- handle TODO
@@ -826,7 +826,7 @@ local function write_dxf(write, dxf)
 			write('5\nA\n') -- handle TODO
 			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
 			write('100\nAcDbSymbolTable\n')
-			write('70\n1\n') -- number of layers
+			write('70\n1\n') -- number of dimstyles
 			write('100\nAcDbDimStyleTable\n')
 			write('71\n1\n') -- NEEDS_RESEARCH
 			do
@@ -861,9 +861,121 @@ local function write_dxf(write, dxf)
 			end
 			write('0\nENDTAB\n')
 		end
+		do -- BLOCK_RECORD
+			write('0\nTABLE\n')
+			write('2\nBLOCK_RECORD\n')
+			write('5\n1\n') -- handle TODO
+			-- write('330\n0\n') -- owner = none TODO: why not in QCAD?
+			write('100\nAcDbSymbolTable\n')
+			write('70\n2\n') -- number of block records
+			do
+				write('0\nBLOCK_RECORD\n')
+				write('5\n1F\n') -- handle TODO
+				-- write('330\n1\n') -- owner TODO: why not in QCAD?
+				write('100\nAcDbSymbolTableRecord\n')
+				write('100\nAcDbBlockTableRecord\n')
+				write('2\n*Model_Space\n') -- name
+				-- write('340\n22\n') -- layout reference TODO
+			end
+			do
+				write('0\nBLOCK_RECORD\n')
+				write('5\n1B\n') -- handle TODO
+				-- write('330\n1\n') -- owner TODO: why not in QCAD?
+				write('100\nAcDbSymbolTableRecord\n')
+				write('100\nAcDbBlockTableRecord\n')
+				write('2\n*Paper_Space\n') -- name
+				-- write('340\n1E\n') -- layout reference TODO
+			end
+			write('0\nENDTAB\n')
+		end
 	end
+
+	do -- BLOCKS
+		write('0\nSECTION\n')
+		write('2\nBLOCKS\n')
+		do
+			write('0\nBLOCK\n')
+			write('5\n20\n') -- handle TODO
+			-- write('330\n1F\n') -- owner TODO why not in QCAD?
+			write('100\nAcDbEntity\n')
+			write('8\n0\n') -- layer
+			write('100\nAcDbBlockBegin\n')
+			write('2\n*Model_Space\n') -- name
+			write('70\n0\n') -- flags
+			write('10\n0.0\n') -- base point x
+			write('20\n0.0\n') -- base point y
+			write('30\n0.0\n') -- base point z
+			write('3\n*Model_Space\n') -- name
+			write('1\n\n') -- xref path name NEEDS_RESEARCH
+			write('0\nENDBLK\n')
+			write('5\n21\n') -- handle TODO
+			-- write('330\n1F\n') -- owner TODO why not in QCAD?
+			write('100\nAcDbEntity\n')
+			write('8\n0\n') -- layer
+			write('100\nAcDbBlockEnd\n')
+		end
+		do
+			write('0\nBLOCK\n')
+			write('5\n1C\n') -- handle TODO
+			-- write('330\n1F\n') -- owner TODO why not in QCAD?
+			write('100\nAcDbEntity\n')
+			write('8\n0\n') -- layer
+			-- write('67\n1\n') -- TODO NEEDS_RESEARCH
+			write('100\nAcDbBlockBegin\n')
+			write('2\n*Paper_Space\n') -- name
+			write('70\n0\n') -- flags
+			write('10\n0.0\n') -- base point x
+			write('20\n0.0\n') -- base point y
+			write('30\n0.0\n') -- base point z
+			write('3\n*Paper_Space\n') -- name
+			write('1\n\n') -- xref path name NEEDS_RESEARCH
+			write('0\nENDBLK\n')
+			write('5\n1D\n') -- handle TODO
+			-- write('330\n1F\n') -- owner TODO why not in QCAD?
+			write('100\nAcDbEntity\n')
+			write('8\n0\n') -- layer
+			write('100\nAcDbBlockEnd\n')
+		end
+		write('0\nENDSEC\n')
+	end
+
+	do -- ENTITIES
+		write('0\nSECTION\n')
+		write('2\nENTITIES\n')
+		write('0\nENDSEC\n')
+	end
+
+	do -- OBJECTS
+		write('0\nSECTION\n')
+		write('2\nOBJECTS\n')
+		do -- root
+			write('0\nDICTIONARY\n')
+			write('5\nC\n') -- handle TODO
+			-- write('330\n0\n') -- owner = none TODO why not in QCAD?
+			write('100\nAcDbDictionary\n')
+			write('280\n0\n') -- hard own elements - 0 = no
+			write('281\n1\n') -- duplicate handling - 1 = keep existing
+			do
+				write('3\nACAD_GROUP\n') -- entry name
+				write('350\nD\n') -- entry value handle TODO
+			end
+		end
+		do -- ACAD_GROUP
+			write('0\nDICTIONARY\n')
+			write('5\nD\n') -- handle TODO
+			-- write('330\nC\n') -- owner = none TODO why not in QCAD?
+			write('100\nAcDbDictionary\n')
+			write('280\n0\n') -- hard own elements - 0 = no
+			write('281\n1\n') -- duplicate handling - 1 = keep existing
+		end
+		write('0\nENDSEC\n')
+	end
+
+	-- TODO: CLASSES
+	
+	write('0\nEOF\n')
 end
-if false then
+if true then
 	local h = io.open('test.dxf', 'w')
 	write_dxf(function(s)
 		h:write(s)
