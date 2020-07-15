@@ -1357,9 +1357,9 @@ if true then
 				width = 1.5;
 			}
 			joists[i] = j
-			env.ensure(('joist %s %d bot left on from top'):format(name, i), j.bottom_left .on(from.top))
+			env.ensure(('joist %s %d bot left on from top'):format(name, i), j.bottom_left.on(from.top))
 			env.ensure(('joist %s %d bot right on from top'):format(name, i), j.bottom_right.on(from.top))
-			env.ensure(('joist %s %d top left on to bottom'):format(name, i), j.top_left .on(to.bottom))
+			env.ensure(('joist %s %d top left on to bottom'):format(name, i), j.top_left.on(to.bottom))
 			env.ensure(('joist %s %d top right on to bottom'):format(name, i), j.top_right.on(to.bottom))
 		end
 		for i = 1, n - 1 do
