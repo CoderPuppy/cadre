@@ -352,7 +352,7 @@ function expr.env()
 
 		h = io.popen('z3 ' .. filename, 'r')
 		local function got_var_val(line, name, val)
-			print(name, val, line)
+			-- print(name, val, line)
 			env.vars[name].val = val
 		end
 		while true do
@@ -1348,14 +1348,39 @@ if true then
 		width = 30 * 12;
 		height = 30 * 12;
 	}
-	d.ledgers[1] = shape.arect 'ledger' {
+	d.house.mudroom = shape.arect 'house mudroom' {
+		right = { x = d.house.left.x; };
+		top = { y = d.house.top.y - (11 * 12 + 11); };
+		width = 5 * 12;
+		height = 8 * 12 + 4;
+	}
+	d.ledgers[1] = shape.arect 'ledger 1' {
 		height = 1.5;
 	}
-	env.ensure('ledger 1 (bottom left) on house top', d.ledgers[1].bottom_left.on(d.house.top))
-	env.ensure('ledger 1 (bottom right) on house top', d.ledgers[1].bottom_right.on(d.house.top))
+	env.ensure('ledger 1 on house top', d.ledgers[1].bottom.ends_on(d.house.top))
+	local function make_posts(beam, n, max_spacing)
+		local posts = {n = n;}
+		beam.posts = posts
+		for i = 1, n do
+			local post = shape.arect(('%s post %d'):format(beam.name, i)) {
+				width = 5.5;
+				height = 5.5;
+			}
+			posts[i] = post
+			env.ensure(('%s post %d on beam'):format(beam.name, i), post.bottom.ends_on(beam.bottom))
+		end
+		for i = 1, n - 1 do
+			local l, r = posts[i], posts[i + 1]
+			env.ensure(('%s posts %d and %d not overlap'):format(beam.name, i, i + 1), expr.increasing(l.right.x, r.left.x))
+			env.ensure(('%s posts %d and %d max spacing'):format(beam.name, i, i + 1), expr.increasing(r.top.point(0.5).x - l.top.point(0.5).x, max_spacing))
+		end
+		env.ensure(('%s first post'):format(beam.name), expr.equal(posts[1].left.x, beam.left.x))
+		env.ensure(('%s last post'):format(beam.name), expr.equal(posts[posts.n].right.x, beam.right.x))
+	end
 	d.beams[1] = shape.arect 'beam 1' {
 		height = 2 * 1.5;
 	}
+	make_posts(d.beams[1], 6, 7 * 12 + 10.625)
 	local function make_joists(name, from, to, n, max_spacing)
 		local joists = {n = n;}
 		for i = 1, n do
@@ -1363,10 +1388,8 @@ if true then
 				width = 1.5;
 			}
 			joists[i] = j
-			env.ensure(('joist %s %d bot left on from top'):format(name, i), j.bottom_left.on(from.top))
-			env.ensure(('joist %s %d bot right on from top'):format(name, i), j.bottom_right.on(from.top))
-			env.ensure(('joist %s %d top left on to bottom'):format(name, i), j.top_left.on(to.bottom))
-			env.ensure(('joist %s %d top right on to bottom'):format(name, i), j.top_right.on(to.bottom))
+			env.ensure(('joist %s %d bot on from top'):format(name, i), j.bottom.ends_on(from.top))
+			env.ensure(('joist %s %d top on to bottom'):format(name, i), j.top.ends_on(to.bottom))
 		end
 		for i = 1, n - 1 do
 			local l, r = joists[i], joists[i + 1]
@@ -1375,8 +1398,40 @@ if true then
 		end
 		return joists
 	end
-	d.joists[1] = make_joists('1', d.ledgers[1], d.beams[1], 1, 16)
+	d.joists[1] = make_joists('1', d.ledgers[1], d.beams[1], 22, 16)
 	env.ensure('beam 1 dist from house', expr.equal(d.beams[1].top.y - d.house.top.y, 11 * 12 + 6))
+	env.ensure('joists 1 right edge', expr.equal(d.joists[1][d.joists[1].n].right.x - d.house.left.x, 27 * 12 + 11))
+	d.ledgers[2] = shape.arect 'ledger 2' {
+		height = 1.5;
+	}
+	env.ensure('ledger 2 on mudroom top', d.ledgers[2].bottom.ends_on(d.house.mudroom.top))
+	d.beams[2] = shape.arect 'beam 2' {
+		height = 3 * 1.5;
+	}
+	d.joists[2] = make_joists('2', d.ledgers[2], d.beams[2], 5, 12)
+	env.ensure('joists 2 left edge', expr.equal(d.house.left.x - d.joists[2][1].left.x, 4 * 12 + 8.5))
+	env.ensure('joists 2 long', expr.equal(d.joists[2][1].height, 16 * 12))
+	env.ensure('joists 1 - 2 connections', expr.increasing(d.joists[1][1].top.point(0.5).x - d.joists[2][d.joists[2].n].top.point(0.5).x, 12))
+	d.joists[3] = make_joists('3', d.beams[2], d.beams[1], 4, 16)
+	env.ensure('joists 3 left edge', expr.equal(d.house.left.x - d.joists[3][1].left.x, 4 * 12 + 8.5))
+	env.ensure('joists 1 - 3 connections', expr.increasing(d.joists[1][1].top.point(0.5).x - d.joists[3][d.joists[3].n].top.point(0.5).x, 16))
+	d.beams[3] = shape.arect 'beam 3' {
+		height = 2 * 1.5;
+	}
+	d.joists[4] = make_joists('4', d.beams[1], d.beams[3], 4, 16)
+	env.ensure('joists 4 left edge', expr.equal(d.house.left.x - d.joists[4][1].left.x, 4 * 12 + 8.5))
+	d.stairs = {
+		stringers = {};
+	}
+	d.stairs.stringers[1] = shape.arect 'stair stringer 1' {
+		height = 1.5;
+	}
+	d.stairs.stringers[2] = shape.arect 'stair stringer 2' {
+		height = 1.5;
+	}
+	env.ensure('stair stringer 1 on joist', d.stairs.stringers[1].left.ends_on(d.joists[4][d.joists[4].n].right))
+	env.ensure('stair stringer 2 on joist', d.stairs.stringers[2].left.ends_on(d.joists[4][d.joists[4].n].right))
+	env.ensure('stairs width', expr.equal(d.stairs.stringers[2].bottom.y - d.stairs.stringers[1].top.y, 3 * 12))
 	env.satisfy()
 	-- print(pl.pretty.write(d))
 end
@@ -1386,16 +1441,29 @@ if true then
 	dxf = make_dxf()
 	if d then
 		local function display(s)
-			print(s.name, s[shape.Sdxf](dxf).handle)
+			print(('%15s -- %x'):format(s.name, s[shape.Sdxf](dxf).handle))
+		end
+		local function display_all(arr)
+			for i = 1, arr.n do
+				display(arr[i])
+			end
 		end
 		-- display(x_axis)
 		-- display(y_axis)
 		display(d.house)
+		display(d.house.mudroom)
 		display(d.ledgers[1])
 		display(d.beams[1])
-		for i = 1, d.joists[1].n do
-			display(d.joists[1][i])
-		end
+		display_all(d.joists[1])
+		display(d.ledgers[2])
+		display(d.beams[2])
+		display_all(d.joists[2])
+		display_all(d.joists[3])
+		display(d.beams[3])
+		display_all(d.joists[4])
+		display(d.stairs.stringers[1])
+		display(d.stairs.stringers[2])
+		display_all(d.beams[1].posts)
 	end
 	dxf.write(function(s)
 		h:write(s)
