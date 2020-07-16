@@ -293,7 +293,7 @@ end
 function expr.env()
 	local env = {
 		vars = {};
-		ensures = {n = 0;};
+		ensures = {};
 	}
 	function env.var(label)
 		local name = symbolify(label)
@@ -313,11 +313,16 @@ function expr.env()
 		setmetatable(var, expr.mt)
 		return var
 	end
-	function env.ensure(name, prop)
-		assert(name)
+	function env.ensure(label, prop)
+		assert(label)
 		assert(prop)
-		env.ensures.n = env.ensures.n + 1
-		env.ensures[env.ensures.n] = {
+		local name = symbolify(label)
+		local i = nil
+		while env.ensures[name .. (i and tostring(i) or '')] do
+			i = (i or 0) + 1
+		end
+		name = name .. (i and tostring(i) or '')
+		env.ensures[name] = {
 			name = name;
 			prop = expr.coerce(prop);
 		}
@@ -332,8 +337,7 @@ function expr.env()
 		for _, var in pairs(env.vars) do
 			h:write(('(declare-fun %s () Real)\n'):format(var.name))
 		end
-		for i = 1, env.ensures.n do
-			local e = env.ensures[i]
+		for _, e in pairs(env.ensures) do
 			h:write(('(assert (! %s :named %s))\n'):format(
 				e.prop[expr.Scode],
 				symbolify(e.name)
