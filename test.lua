@@ -332,7 +332,7 @@ function expr.env()
 		local filename = 'test.smt2'
 		print(filename)
 		local h = io.open(filename, 'w')
-		h:write '(set-logic QF_NRA)\n'
+		h:write '(set-logic QF_LRA)\n'
 		h:write '(set-option :produce-unsat-cores true)\n'
 		for _, var in pairs(env.vars) do
 			h:write(('(declare-fun %s () Real)\n'):format(var.name))
@@ -1108,13 +1108,13 @@ function shape.point(name, opts)
 	shape.make(point, opts)
 	return point
 end
-function shape.line(name, opts)
+function shape.line(name, x_coef, y_coef, opts)
 	local line = {
 		[shape.sym] = true;
 		[shape.Stype] = 'line';
 		name = name;
-		x_coef = env.var(name .. ' x coef');
-		y_coef = env.var(name .. ' y coef');
+		x_coef = x_coef;
+		y_coef = y_coef;
 		const = env.var(name .. ' const');
 	}
 	env.ensure(('%s real'):format(name), expr.not_(expr.and_(expr.equal(line.x_coef, 0), expr.equal(line.y_coef, 0))))
@@ -1155,22 +1155,18 @@ function shape.line(name, opts)
 	shape.make(line, opts)
 	return line
 end
-local x_axis = shape.line 'x axis' {
-	x_coef = 0;
-	y_coef = 1;
+local x_axis = shape.line('x axis', 0, 1) {
 	const = 0;
 }
-local y_axis = shape.line 'y axis' {
-	x_coef = 1;
-	y_coef = 0;
+local y_axis = shape.line('y axis', 1, 0) {
 	const = 0;
 }
-function shape.line_segment(name, opts)
+function shape.line_segment(name, x_coef, y_coef, opts)
 	local segment = {
 		[shape.sym] = true;
 		[shape.Stype] = 'line_segment';
 		name = name;
-		line = shape.line(name .. ' line');
+		line = shape.line(name .. ' line', x_coef, y_coef);
 	}
 	segment.segments = { n = 1; segment; }
 	segment.points = {
@@ -1220,10 +1216,16 @@ function shape.line_segment(name, opts)
 			y = segment.points[1].y * (1 - t) + segment.points[2].y * t;
 		}
 	end
+	function segment.ends_on(other)
+		return expr.and_(
+			segment.points[1].on(other),
+			segment.points[2].on(other)
+		)
+	end
 	shape.make(segment, opts)
 	return segment
 end
-function shape.poly(name, n, closed, opts)
+function shape.poly(name, n, closed, ...)
 	local poly = {
 		[shape.sym] = true;
 		[shape.Stype] = 'poly';
@@ -1235,7 +1237,7 @@ function shape.poly(name, n, closed, opts)
 		poly.points[i] = shape.point(name .. ' p' .. tostring(i))
 	end
 	for i = 1, n - 1 do
-		poly.segments[i] = shape.line_segment(name .. ' s' .. tostring(i), {
+		poly.segments[i] = shape.line_segment(name .. ' s' .. tostring(i), select(i * 2 - 1, ...), select(i * 2, ...), {
 			points = {
 				poly.points[i];
 				poly.points[i + 1];
@@ -1243,7 +1245,7 @@ function shape.poly(name, n, closed, opts)
 		})
 	end
 	if closed then
-		poly.segments[n] = shape.line_segment(name .. ' s' .. tostring(n), {
+		poly.segments[n] = shape.line_segment(name .. ' s' .. tostring(n), select(n * 2 - 1, ...), select(n * 2, ...), {
 			points = {
 				poly.points[n];
 				poly.points[1];
@@ -1286,7 +1288,7 @@ function shape.poly(name, n, closed, opts)
 			end;
 		}
 	end
-	shape.make(poly, opts)
+	shape.make(poly, nil) -- TODO: opts
 	return poly
 end
 function shape.rect(name, opts)
@@ -1294,7 +1296,7 @@ function shape.rect(name, opts)
 		[shape.sym] = true;
 		[shape.Stype] = 'rect';
 		name = name;
-		poly = shape.poly(name .. ' poly', 4, true);
+		poly = shape.poly(name .. ' poly', 4, true, 0, -1, -1, 0, 0, 1, 1, 0);
 	}
 	rect.top = rect.poly.segments[1]
 	rect.right = rect.poly.segments[2]
